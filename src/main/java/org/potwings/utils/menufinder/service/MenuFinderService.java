@@ -61,7 +61,9 @@ public class MenuFinderService {
       while (true) {
 
         // 모든 음식점 목록을 불러오기 위해 스크롤 진행
-        scrollWholeList(driver, wait);
+        // 빠른 테스트를 위해 비활성화
+        // TODO 향후 주석 해제할 것
+        // scrollWholeList(driver, wait);
 
         // 음식점 목록 로딩 완료 후 결과 추출
         List<WebElement> storeList = driver.findElements(By.className("iHXbN"));
@@ -73,6 +75,9 @@ public class MenuFinderService {
           String matchedStore = checkStoreMenus(driver, wait, findMenuList);
           if (matchedStore != null) {
             resultList.add(matchedStore);
+            // 빠른 테스트를 위해 음식점 검색 성공했을 경우 중단
+            // TODO 향후 주석 제거할 것
+            return resultList;
           }
           driver.switchTo().frame(searchIframe); // 검색 iframe으로 이동
         }
@@ -148,6 +153,8 @@ public class MenuFinderService {
 
       // 모든 메뉴 목록을 불러오기 위해 더보기 클릭
       WebElement moreMenu = null;
+      // 메뉴가 하나라도 로딩될 떄까지 대기
+      wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("lPzHi")));
       while (true) {
         try {
           moreMenu = driver.findElement(By.className("TeItc"));
