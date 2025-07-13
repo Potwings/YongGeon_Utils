@@ -8,19 +8,21 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.NoSuchElementException;
+import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
+import org.potwings.utils.menufinder.dto.StoreInfo;
 import org.springframework.stereotype.Service;
 
 @Service
 @Log4j2
 public class MenuFinderService {
 
-  public List<String> findMenuHaveStore(String findStore, String findMenu) {
+  public List<StoreInfo> findMenuHaveStore(String findStore, String findMenu) {
 
     System.setProperty("webdriver.chrome.driver", "C:/zzz/chromedriver-win64/chromedriver.exe");
 
@@ -41,7 +43,7 @@ public class MenuFinderService {
     WebDriver driver = new ChromeDriver(options);
     WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
 
-    List<String> resultList = null;
+    List<StoreInfo> resultList = null;
     try {
       driver.get("https://map.naver.com");  // 네이버 지도 접속
 
@@ -65,21 +67,24 @@ public class MenuFinderService {
         // TODO 향후 주석 해제할 것
         // scrollWholeList(driver, wait);
 
-        // 음식점 목록 로딩 완료 후 결과 추출
+        // 음식점 목록 로딩 완료 대기
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("iHXbN")));
+        // 완료 후 음식점 목록 탐색
         List<WebElement> storeList = driver.findElements(By.className("iHXbN"));
         for (WebElement store : storeList) {
           wait.until(ExpectedConditions.elementToBeClickable(store)).click();
-          Thread.sleep(3000); // 음식점 클릭 후 로딩 대기
 
           // 음식점에 특정 메뉴 포함하고 있는지 여부 확인
-          String matchedStore = checkStoreMenus(driver, wait, findMenuList);
+          StoreInfo matchedStore = checkStoreMenus(driver, wait, findMenuList);
           if (matchedStore != null) {
             resultList.add(matchedStore);
-            // 빠른 테스트를 위해 음식점 검색 성공했을 경우 중단
-            // TODO 향후 주석 제거할 것
-            return resultList;
           }
           driver.switchTo().frame(searchIframe); // 검색 iframe으로 이동
+        }
+
+        if (!resultList.isEmpty()) {
+          // 메뉴를 가지고 있는 음식점을 하나라도 찾았을 경우 중단
+          break;
         }
 
         // [이전 페이지, 다음 페이지] 버튼 목록 중 다음 페이지 선택
@@ -131,12 +136,12 @@ public class MenuFinderService {
     }
   }
 
-  private String checkStoreMenus(WebDriver driver, WebDriverWait wait,
+  private StoreInfo checkStoreMenus(WebDriver driver, WebDriverWait wait,
       List<String> findMenuList) {
 
-    String matchResult = null;
+    StoreInfo matchResult = null;
     try {
-      driver.switchTo().defaultContent(); // 다음 store 찾을 수 있도록 전체 화면으로 focus 이동
+      driver.switchTo().defaultContent(); // 가게 정보 Iframe 찾을 수 있도록 전체 화면으로 focus 이동
       WebElement storeIframe = wait.until(
           ExpectedConditions.visibilityOfElementLocated(By.cssSelector("#entryIframe")));
       driver.switchTo().frame(storeIframe); // 음식점 iframe으로 이동
@@ -154,7 +159,13 @@ public class MenuFinderService {
       // 모든 메뉴 목록을 불러오기 위해 더보기 클릭
       WebElement moreMenu = null;
       // 메뉴가 하나라도 로딩될 떄까지 대기
-      wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("lPzHi")));
+      try {
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("lPzHi")));
+      } catch (TimeoutException e) {
+        // 메뉴가 등록되어있지 않은 음식점 skip
+        log.info("The store has no menu.: {}", e.getMessage());
+        return null;
+      }
       while (true) {
         try {
           moreMenu = driver.findElement(By.className("TeItc"));
@@ -162,6 +173,7 @@ public class MenuFinderService {
           break;
         }
         moreMenu.click();
+        // TODO wait.until로 변경할 방안 도출
         Thread.sleep(3000L); // 로딩 대기
       }
 
@@ -176,10 +188,17 @@ public class MenuFinderService {
           .toList();
 
       if (!findResult.isEmpty()) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("음식점 명 : ").append(driver.findElement(By.className("GHAhO")).getText());
-        findResult.forEach(result -> sb.append(result).append(", "));
-        matchResult = sb.toString();
+        String storeName = driver.findElement(By.className("GHAhO")).getText();
+        // 공유하기 버튼을 찾기 위해 맨 위로 이동
+        ((JavascriptExecutor) driver).executeScript("window.scrollTo(0, 0);");
+        WebElement shareBtn = driver.findElement(By.id("_btp.share"));
+        shareBtn.click();
+        WebElement shareElement = wait.until(
+            ExpectedConditions.presenceOfElementLocated(By.className("_spi_input_copyurl"))
+        );
+        String storeURL = shareElement.getText();
+        List<String> matchedMenus = findResult.stream().map(WebElement::getText).toList();
+        matchResult = new StoreInfo(storeName, matchedMenus, storeURL);
       }
 
       driver.switchTo().defaultContent(); // 다음 store 검색을 위해 현재 store Iframe에서 빠져나옴
