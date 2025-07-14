@@ -63,16 +63,32 @@ public class MenuFinderService {
       while (true) {
 
         // 모든 음식점 목록을 불러오기 위해 스크롤 진행
-        // 빠른 테스트를 위해 비활성화
-        // TODO 향후 주석 해제할 것
+        // for test: 빠른 테스트를 위해 비활성화
+        // TODO ul 하위에 lazyload-wrapper라는 클래스를 가진 div가 있는지 여부를 확인하도록 수정
         // scrollWholeList(driver, wait);
 
-        // 음식점 목록 로딩 완료 대기
-        wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("iHXbN")));
-        // 완료 후 음식점 목록 탐색
-        List<WebElement> storeList = driver.findElements(By.className("iHXbN"));
+        // 키워드에 따라 HTML 요소가 다르게 노출됨으로 mainDiv 탐색 후 그 하위의 li를 통하여 store 목록 확인
+        WebElement mainDiv = wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("Ryr1F")));
+
+        // mainDiv 하위의 ul 태그에서 모든 li 태그를 가져옴
+        List<WebElement> allLiElements = mainDiv.findElements(By.tagName("li"));
+
+        List<WebElement> storeList;
+        if (!allLiElements.isEmpty()) {
+            // 첫 번째 li 태그의 클래스를 가져옴
+            String firstLiClass = allLiElements.get(0).getAttribute("class");
+
+            // 광고 li를 제외하기 위해 첫 번째 li 태그와 동일한 클래스를 가진 li만 필터링
+            storeList = allLiElements.stream()
+                .filter(li -> li.getAttribute("class").equals(firstLiClass))
+                .toList();
+        } else {
+            storeList = new ArrayList<>(); // li 태그가 없으면 빈 리스트로 초기화
+        }
         for (WebElement store : storeList) {
-          wait.until(ExpectedConditions.elementToBeClickable(store)).click();
+          // li 중 클릭하여 store 상세보기 할 수 있는 부분 탐색
+          WebElement clickableStoreArea = store.findElement((By.tagName("a")));
+          wait.until(ExpectedConditions.elementToBeClickable(clickableStoreArea)).click();
 
           // 음식점에 특정 메뉴 포함하고 있는지 여부 확인
           StoreInfo matchedStore = checkStoreMenus(driver, wait, findMenuList);
@@ -99,7 +115,8 @@ public class MenuFinderService {
     } catch (Exception e) {
       log.error("findMenu fail : {}", e.getMessage(), e);
     } finally {
-      driver.quit();
+      // for test: 이슈 발생 시 확인하기 위해 브라우저 종료하지 않고 유지
+      // driver.quit();
     }
     return resultList;
   }
