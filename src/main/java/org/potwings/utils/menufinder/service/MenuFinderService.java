@@ -163,39 +163,109 @@ public class MenuFinderService {
           ExpectedConditions.visibilityOfElementLocated(By.cssSelector("#entryIframe")));
       driver.switchTo().frame(storeIframe); // 음식점 iframe으로 이동
 
-      // 음식점 페이지 중단 선택 메뉴
+      // 음식점 페이지 중단 탭 버튼
       List<WebElement> spans = driver.findElements(By.className("veBoZ"));
+      boolean haveMenu = false;
       for (WebElement span : spans) {
         // 그 중 메뉴 버튼 클릭
         if (span.getText().equals("메뉴")) {
           span.click();
+          haveMenu = true;
           break;
         }
+      }
+
+      if (!haveMenu) {
+        // 메뉴가 등록되어있지 않은 경우 중단
+        return null;
       }
 
       // 모든 메뉴 목록을 불러오기 위해 더보기 클릭
       WebElement moreMenu = null;
-      // 메뉴가 하나라도 로딩될 떄까지 대기
+      // 메뉴가 하나라도 로딩될 때까지 대기
+      List<WebElement> menuList = new ArrayList<>();
+      boolean isNormalStoreInfo = false;
+
       try {
         wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("lPzHi")));
+        isNormalStoreInfo = true;
       } catch (TimeoutException e) {
-        // 메뉴가 등록되어있지 않은 음식점 skip
-        log.info("The store has no menu.: {}", e.getMessage());
-        return null;
-      }
-      while (true) {
+        // lPzHi 태그에 메뉴를 가지고 있지 않은 다른 HTML 형식일 경우
+        log.info("lPzHi class not found, checking for alternative menu format: {}", e.getMessage());
+
+        // 다른 형식의 메뉴 요소 찾기 (예: 다른 클래스명 사용)
         try {
-          moreMenu = driver.findElement(By.className("TeItc"));
-        } catch (NoSuchElementException e) {
-          break;
+          wait.until(ExpectedConditions.visibilityOfElementLocated(
+              By.className("MenuContent__tit__313LA")));
+        } catch (TimeoutException ex) {
+          log.info("No menu found in any format: {}", ex.getMessage());
+          return null;
         }
-        moreMenu.click();
-        // TODO wait.until로 변경할 방안 도출
-        Thread.sleep(3000L); // 로딩 대기
       }
 
       // 메뉴 목록 추출
-      List<WebElement> menuList = driver.findElements(By.className("lPzHi"));
+      if (isNormalStoreInfo) {
+        // 일반적인 음식점 정보인 경우
+        while (true) {
+          try {
+            moreMenu = driver.findElement(By.className("TeItc"));
+          } catch (NoSuchElementException e) {
+            break;
+          }
+          moreMenu.click();
+          // TODO wait.until로 변경할 방안 도출
+          Thread.sleep(3000L); // 로딩 대기
+        }
+        menuList = driver.findElements(By.className("lPzHi"));
+      } else {
+        // 네이버 플레이스를 통해 주문 가능한 음식점의 경우
+        // 무한 스크롤 처리를 위해 페이지 끝까지 스크롤
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+        long lastHeight = (long) js.executeScript("return document.body.scrollHeight");
+
+        while (true) {
+          // 현재 스크롤 위치 가져오기
+          long currentPosition = (long) js.executeScript("return window.pageYOffset");
+          long targetPosition = (long) js.executeScript("return document.body.scrollHeight");
+
+          // 천천히 스크롤 (한 번에 300px씩)
+          while (currentPosition < targetPosition - 100) {
+            currentPosition += 300;
+            js.executeScript("window.scrollTo(0, " + currentPosition + ");");
+
+            // 각 스크롤 단계마다 짧은 대기
+            try {
+              Thread.sleep(200L);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              break;
+            }
+          }
+
+          // 마지막으로 페이지 끝까지 스크롤
+          js.executeScript("window.scrollTo(0, document.body.scrollHeight);");
+
+          // 새로운 콘텐츠가 로드될 때까지 대기
+          try {
+            Thread.sleep(1000L);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            break;
+          }
+
+          // 새로운 높이 확인
+          long newHeight = (long) js.executeScript("return document.body.scrollHeight");
+
+          // 더 이상 새로운 콘텐츠가 없으면 중단
+          if (newHeight == lastHeight) {
+            break;
+          }
+          lastHeight = newHeight;
+        }
+
+        // 모든 메뉴 목록 가져오기
+        menuList = driver.findElements(By.className("MenuContent__tit__313LA"));
+      }
 
       List<WebElement> findResult = menuList.stream()
           .filter(el -> {
@@ -205,7 +275,19 @@ public class MenuFinderService {
           .toList();
 
       if (!findResult.isEmpty()) {
-        String storeName = driver.findElement(By.className("GHAhO")).getText();
+        // 메뉴 목록 저장
+        List<String> matchedMenus = findResult.stream().map(WebElement::getText).toList();
+
+        WebElement stroeNameElement = null;
+        try {
+          stroeNameElement = driver.findElement(By.className("GHAhO"));
+        } catch (NoSuchElementException nse) {
+          // 네이버 플레이스의 경우 음식점 이름 안보이므로 탭 이동후 다시 확인
+          // 첫번째 탭은 다른 요소가 가리고 있어 두번째 탭 클릭
+          driver.findElements(By.className("PlaceHeader__link__slT-J")).get(1).click();
+          stroeNameElement = driver.findElement(By.className("GHAhO"));
+        }
+        String storeName = stroeNameElement.getText();
         // 공유하기 버튼을 찾기 위해 맨 위로 이동
         ((JavascriptExecutor) driver).executeScript("window.scrollTo(0, 0);");
         WebElement shareBtn = driver.findElement(By.id("_btp.share"));
@@ -214,13 +296,12 @@ public class MenuFinderService {
             ExpectedConditions.presenceOfElementLocated(By.className("_spi_input_copyurl"))
         );
         String storeURL = shareElement.getText();
-        List<String> matchedMenus = findResult.stream().map(WebElement::getText).toList();
         matchResult = new StoreInfo(storeName, matchedMenus, storeURL);
       }
 
       driver.switchTo().defaultContent(); // 다음 store 검색을 위해 현재 store Iframe에서 빠져나옴
     } catch (Exception e) {
-      log.error("메뉴 클릭 처리 중 오류 발생 : {}", e.getMessage(), e);
+      log.error("메뉴 확인 중 오류 발생 : {}", e.getMessage(), e);
     }
 
     // 메뉴 없는 경우
