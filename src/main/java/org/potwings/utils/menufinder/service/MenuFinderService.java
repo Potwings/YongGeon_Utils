@@ -1,5 +1,6 @@
 package org.potwings.utils.menufinder.service;
 
+import java.io.File;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -8,6 +9,7 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.NoSuchElementException;
+import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -16,11 +18,16 @@ import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.potwings.utils.menufinder.dto.StoreInfo;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 @Log4j2
 public class MenuFinderService {
+
+  @Autowired
+  private ImageService imageService;
+
 
   public List<StoreInfo> findMenuHaveStore(String findStore, String findMenu) {
 
@@ -296,6 +303,29 @@ public class MenuFinderService {
             ExpectedConditions.presenceOfElementLocated(By.className("_spi_input_copyurl"))
         );
         String storeURL = shareElement.getText();
+
+        String storeId = null;
+        try {
+          // role="main"을 가지고 있는 div 바로 하위에 있는 매장 이미지값 불러오기 위해 진행
+          WebElement mainDiv = driver.findElement(By.cssSelector("[role='main']"));
+          WebElement imagesDiv = mainDiv.findElements(By.tagName("*")).get(0);
+          WebElement imagesDiv2 = imagesDiv.findElements(By.tagName("*")).get(0);
+          WebElement representImage = imagesDiv2.findElements(By.tagName("*")).get(0);
+
+          // 대표 이미지가 있을 경우 저장
+          storeId = storeURL.substring(storeURL.lastIndexOf("/") + 1);
+          if (!imageService.isStoreImage(storeId)) {
+            // 저장된 이미지가 없을 경우 저장
+            ((JavascriptExecutor) driver).executeScript("window.scrollTo(0, 0);"); // 이미지 추출을 위해 맨 위로 이동
+            File storeImageFile = representImage.getScreenshotAs(OutputType.FILE);
+            imageService.storeImage(storeId, storeImageFile);
+          }
+
+        } catch (NoSuchElementException nse) {
+          // 이미지가 없을 경우 생략
+          log.debug("No Store Image : {}", storeId);
+        }
+
         matchResult = new StoreInfo(storeName, matchedMenus, storeURL);
       }
 
